@@ -1,0 +1,135 @@
+---
+title: "NYPD Shooting Incident Analysis"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+```
+
+## Project Description
+This project is an analysis of NYPD shooting incident data gathered from the Office of Management Analysis and Planning. This is a breakdown of every shooting incident that occurred in NYC going back to 2006 through the end of the previous calendar year.
+
+## Import and Set-up Data
+First, I'm going to import the relevant data into the R session using `read_csv`.
+
+```{r import}
+data_url <- 'https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD'
+data <- read_csv(data_url)
+```
+
+## Tidying the Dataset
+
+You'll notice that the `OCCUR_DATE` variable is currently stored as a character vector. I'll use lubridate to make this a proper date object.
+
+```{r date_mod}
+data$OCCUR_DATE <- mdy(data$OCCUR_DATE)
+```
+
+There are also some variables in the dataset that we won't use for the purpose of this analysis.
+
+Namely, these include:
+
+  * LOCATION_DESC
+  * X_COORD_CD
+  * Y_COORD_CD
+  * Lon_Lat
+  
+The following code block will remove these columns.
+
+```{r var_rm}
+data = subset(data, select = -c(LOCATION_DESC, X_COORD_CD, Y_COORD_CD, Lon_Lat))
+```
+
+I'll run a summary of the data now to make sure that everything looks good.
+
+```{r summary}
+summary(data)
+```
+Looking at the summary, things appear to be good to go. Since a lot of this data is categorical, there aren't too many outliers to deal with at this point.
+
+## Analyzing the Data
+
+### Shootings per Borough
+At this point, the data is present in the environment and ready to be analyzed.
+
+One question that I would like to explore is which boroughs of New York City have the most shooting incidents.
+
+We can perform a visualization on this dataset to get the answer to this question.
+
+Using `ggplot2,` we can create a bar graph which will show incidents per borough.
+
+```{r per_boro}
+ggplot(data=data, aes(x = BORO)) +
+  geom_bar() +
+  labs(title = "Shootings by Borough",
+       x = "Borough",
+       y = "Shooting incidents")
+```
+
+Here, we can see that Brooklyn has significantly more shooting incidents than other boroughs. Please keep in mind that this is raw total shootings, and isn't controlled for population. We can't say that Brooklyn is more dangerous than the Bronx, for example, since this analysis is not per-capita shooting incidents.
+
+### Shooting Incidents by Date
+Another question that I would like to explore is whether or not certain days are more dangerous than others with regard to shooting incidents.
+
+```{r date_analysis}
+ggplot(data=data, aes(x = OCCUR_DATE)) +
+  geom_bar() +
+  labs(title = "Shootings by Date",
+       x = "Date",
+       y = "Shooting incidents")
+```
+
+As we can see from the barchart, it looks like some days are definitely more dangerous than others. There also seems to be some kind of frequency to which days are more deadly, at first glance. My suspicion is that this is different days of the week which are more deadly than others. I'll attempt to demonstrate this here.
+
+Since we have the date of each occurrence, we can use the `wday` function from `lubridate` to find the day of the week, as follows:
+
+```{r weekday}
+data$DAY_OF_WEEK <- wday(data$OCCUR_DATE, label = TRUE)
+
+table(data$DAY_OF_WEEK)
+```
+As we can see, the number of murders is significantly higher around the weekend.
+
+## Modeling the Data
+
+Next, we want to use this data to create a model that can predict future data points.
+
+This dataset includes a variable called `STATISTICAL_MURDER_FLAG` which indicates if the shooting incident is likely a murder or not. Next, I will attempt to use regression to determine if a given observation will trigger this statistical murder flag using the other variables at our disposal.
+
+This is a primary candidate for a type of regression called logistic regression - which is used to predict the likely outcome of a situation based on variables at our disposal. In this case, we are trying to predict `STATISTICAL_MURDER_FLAG` from the other variables in our data.
+
+```{r model}
+glm.fit <- glm(STATISTICAL_MURDER_FLAG ~ PERP_RACE + PERP_SEX + PERP_AGE_GROUP + DAY_OF_WEEK + Latitude + Longitude, data = data, family = binomial)
+summary(glm.fit)
+```
+
+From this model, we can see that there are several statistically significant variables in our data. These include:
+
+  * Perpetrator Sex Unknown (PERP_SEXU)
+  * Perpetrator Age Group 18-24 (PERP_AGE_GROUP18-24)
+  * Perpetrator Age Group 25-44 (PERP_AGE_GROUP25-44)
+  * Perpetrator Age Group 45-64 (PERP_AGE_GROUP18-24)
+  * Perpetrator Age Group 65+ (PERP_AGE_GROUP65+)
+  * Perpetrator Age Group Unknown (PERP_AGE_GROUPUNKNOWN)
+  * Latitude
+  
+Interestingly, you will notice that the day of the week is NOT statistically significant in this model - meaning that even though there are more shooting incidents on the weekends, it is not more likely that a murder will occur on any given day of the week.
+
+## Identifying Model Bias
+
+In any model, it is of course important to factor in bias that may be affecting the observations in our dataset.
+
+Right now in the United States, policing is a relatively controversial issue. Data shows that some populations in our country are unfairly targeted by police, which can lead to observations that are tainted with the same bias affecting those undeserved populations.
+
+We need to consider that the source of these observations is the police department itself, so it could very well be possible that the data points are affected by the perspective of the police department. If that were to be true, however, we would expect to see some kind of significant skew (or other external pressure) applied to the dataset.
+
+In this case, I was not able to find evidence of some type of skew or unexpected relationship in the data. It makes sense to me that the age of the perpetrator is significant to the murder flag. Also, it makes sense that being unable to determine the sex of the perpetrator is significant. I would assume that usually those who commit murders are trying to conceal their identity.
+
+All things considered, while I am concious of the bias in this case, I don't think that there is any significant evidence of bias in my model at this time.
